@@ -1,121 +1,81 @@
 import ccxt from 'ccxt';
 import { RSI, BollingerBands } from 'technicalindicators';
 import Groq from "groq-sdk";
+import { createClient } from '@supabase/supabase-js';
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Inicializar Clientes
+const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const exchange = new ccxt.binance();
 
 // Configuración
 const symbol = 'SOL/USDT';
 const timeframe = '1h';
 
-// Inicializar Groq
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+async function KAIROS_SISTEMA_COMPLETO() {
+    console.log(`🚀 INICIANDO KAIROS: Ojos, Cerebro y Memoria...`);
 
-async function KAIROS_EN_VIVO() {
-  console.log(`🚀 INICIANDO SISTEMA KAIROS...`);
-  console.log(`📡 Conectando con Binance para ver ${symbol}...`);
+    try {
+        // --- 1. OJOS: Obtener datos reales ---
+        const velas = await exchange.fetchOHLCV(symbol, timeframe, undefined, 100);
+        const preciosCierre = velas.map(v => v[4] as number).filter(p => typeof p === 'number');
+        
+        const rsiRaw = RSI.calculate({ values: preciosCierre, period: 14 });
+        const bbRaw = BollingerBands.calculate({ values: preciosCierre, period: 20, stdDev: 2 });
 
-  // --- FASE 1: LOS OJOS (Recolectar Datos Reales) ---
-  const exchange = new ccxt.binance();
-  let datosDeMercado;
+        const precioActual = preciosCierre[preciosCierre.length - 1];
+        const rsiActual = rsiRaw[rsiRaw.length - 1];
+        const bbActual = bbRaw[bbRaw.length - 1];
 
-  try {
-    const velas = await exchange.fetchOHLCV(symbol, timeframe, undefined, 100);
-    
-    // Validación estricta de datos
-    if (!velas || velas.length < 20) throw new Error("Datos insuficientes de Binance");
+        const datosMercado = {
+            precio: precioActual,
+            rsi: rsiActual.toFixed(2),
+            banda_sup: bbActual.upper.toFixed(2),
+            banda_inf: bbActual.lower.toFixed(2)
+        };
 
-    // Limpiamos los datos (Solo números válidos)
-    const preciosCierre = velas
-        .map(v => v[4])
-        .filter((p): p is number => typeof p === 'number');
+        // --- 2. CEREBRO: Análisis de IA ---
+        console.log(`🧠 Analizando con Llama 3.3...`);
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: "Eres KAIROS, trader experto. Responde SOLO en JSON: {\"decision\": \"...\", \"razonamiento\": \"...\", \"confianza\": 0-100, \"sl\": 0, \"tp\": 0}" },
+                { role: "user", content: `Datos: ${JSON.stringify(datosMercado)}` }
+            ],
+            model: "llama-3.3-70b-versatile",
+            temperature: 0,
+        });
 
-    // Cálculos Matemáticos
-    const rsiRaw = RSI.calculate({ values: preciosCierre, period: 14 });
-    const bbRaw = BollingerBands.calculate({ values: preciosCierre, period: 20, stdDev: 2 });
+        const decision = JSON.parse(completion.choices[0]?.message?.content || "{}");
 
-    const precioActual = preciosCierre[preciosCierre.length - 1];
-    const rsiActual = rsiRaw[rsiRaw.length - 1];
-    const bbActual = bbRaw[bbRaw.length - 1];
+        // --- 3. MEMORIA: Guardar en Supabase ---
+        console.log(`💾 Guardando en Supabase...`);
+        const { error } = await supabase
+            .from('ai_logs')
+            .insert([{
+                pair: symbol,
+                price_at_time: precioActual,
+                rsi: parseFloat(datosMercado.rsi),
+                bollinger_status: precioActual > bbActual.upper ? 'SOBRECOMPRA' : precioActual < bbActual.lower ? 'SOBREVENTA' : 'NEUTRAL',
+                judge_verdict: decision.decision,
+                confidence_score: decision.confianza,
+                reasoning: decision.razonamiento // Asegúrate que esta columna existe en tu tabla
+            }]);
 
-    // Diagnóstico de Bandas
-    let estadoBandas = "Neutro (Dentro del canal)";
-    if (precioActual > bbActual.upper) estadoBandas = "SOBRECOMPRA (Rompiendo Arriba)";
-    if (precioActual < bbActual.lower) estadoBandas = "SOBREVENTA (Rompiendo Abajo)";
+        if (error) throw error;
 
-    // Empaquetamos la realidad
-    datosDeMercado = {
-      precio: precioActual,
-      rsi: rsiActual.toFixed(2),
-      bandas: estadoBandas,
-      banda_superior: bbActual.upper.toFixed(2),
-      banda_inferior: bbActual.lower.toFixed(2)
-    };
+        // Mostrar resultado final en consola
+        console.log("\n========================================");
+        console.log(`✅ ANÁLISIS COMPLETADO Y GUARDADO`);
+        console.log(`📢 DECISIÓN: ${decision.decision}`);
+        console.log(`📝 RAZÓN: ${decision.razonamiento}`);
+        console.log("========================================\n");
 
-    console.log(`✅ Datos obtenidos: Precio $${precioActual} | RSI ${rsiActual.toFixed(2)}`);
-
-  } catch (error) {
-    console.error("❌ Error leyendo el mercado:", error);
-    return; // Abortar misión si no hay ojos
-  }
-
-
-  // --- FASE 2: EL CEREBRO (Analizar Datos Reales) ---
-  console.log(`🧠 Enviando datos reales a Groq (Llama 3.3)...`);
-
-  try {
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `Eres KAIROS, un trader IA profesional.
-          Analiza los datos TÉCNICOS REALES que te paso.
-          
-          ESTRATEGIA:
-          - RSI < 30: Buscar COMPRAS (Oportunidad).
-          - RSI > 70: Buscar VENTAS (Peligro).
-          - Precio rompiendo bandas: Reversión probable.
-          
-          Responde EXCLUSIVAMENTE con este JSON:
-          {
-            "decision": "COMPRAR" | "VENDER" | "ESPERAR",
-            "razonamiento": "Explicación breve y técnica",
-            "confianza": 0-100,
-            "stop_loss": number,
-            "take_profit": number
-          }`
-        },
-        {
-          role: "user",
-          content: `DATOS EN TIEMPO REAL DE AHORA MISMO: ${JSON.stringify(datosDeMercado)}`
-        }
-      ],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0,
-    });
-
-    const respuesta = completion.choices[0]?.message?.content || "{}";
-    // Limpieza de JSON (por si la IA pone texto extra)
-    const jsonLimpio = respuesta.replace(/```json/g, "").replace(/```/g, "").trim();
-    const decision = JSON.parse(jsonLimpio);
-
-    console.log("\n========================================");
-    console.log("🤖 KAIROS DECISIÓN FINAL (DATOS REALES)");
-    console.log("========================================");
-    console.log(`📢 ACCIÓN:      ${decision.decision}`);
-    console.log(`📝 POR QUÉ:     ${decision.razonamiento}`);
-    console.log(`💪 CONFIANZA:   ${decision.confianza}%`);
-    console.log(`🛡️ STOP LOSS:   $${decision.stop_loss}`);
-    console.log(`💰 TAKE PROFIT: $${decision.take_profit}`);
-    console.log("========================================\n");
-
-  } catch (error) {
-    console.error("❌ La IA sufrió un derrame:", error);
-  }
+    } catch (error) {
+        console.error("❌ Error en el sistema:", error);
+    }
 }
 
-// ¡FUEGO!
-KAIROS_EN_VIVO();
+KAIROS_SISTEMA_COMPLETO();
