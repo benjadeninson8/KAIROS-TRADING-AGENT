@@ -3,7 +3,7 @@ import { RSI, BollingerBands } from 'technicalindicators';
 import Groq from "groq-sdk";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from "dotenv";
-import { KAIROS_CONFIG } from './config'; // <--- IMPORTAMOS TUS REGLAS
+import { KAIROS_CONFIG } from './'; // <--- IMPORTAMOS TUS REGLAS
 
 dotenv.config();
 

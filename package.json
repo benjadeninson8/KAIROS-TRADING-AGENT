@@ -19,7 +19,7 @@
   },
   "homepage": "https://github.com/benjadeninson8/KAIROS-TRADING-AGENT#readme",
   "devDependencies": {
-    "@types/node": "^25.3.5",
+    "@types/node": "^25.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
