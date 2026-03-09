@@ -7,7 +7,6 @@ dotenv.config();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // Definimos la estructura de los datos que reciben los agentes
-// ACTUALIZACIÓN: Hacemos el volumen obligatorio y detallado
 interface DatosMercado {
   precio: number;
   rsi: string;
@@ -57,7 +56,7 @@ async function consultarBear(datos: DatosMercado) {
   return completion.choices[0]?.message?.content || "Sin argumentos.";
 }
 
-// 📰 EL AGENTE FUNDAMENTAL (Nuevo: Analista de Volumen/Psicología)
+// 📰 EL AGENTE FUNDAMENTAL (Analista de Volumen)
 async function consultarFundamental(datos: DatosMercado) {
   const estadoVolumen = datos.volumen.esAlto ? "MUY ALTO (Posible Noticia)" : "NORMAL/BAJO";
   
@@ -80,13 +79,12 @@ async function consultarFundamental(datos: DatosMercado) {
   return completion.choices[0]?.message?.content || "Mercado sin volumen relevante.";
 }
 
-// ⚖️ EL JUEZ SUPREMO (Decisión Final Dinámica)
+// ⚖️ EL JUEZ SUPREMO (CALIBRADO PARA MATEMÁTICA ESTRICTA)
 export async function OBTENER_JUICIO_FINAL(datos: DatosMercado) {
   console.log("   🐮 Bull está analizando...");
   console.log("   🐻 Bear está analizando...");
   console.log("   📰 Fundamental está leyendo el volumen...");
 
-  // Ejecutamos a los 3 agentes en paralelo
   const [argumentoBull, argumentoBear, argumentoFund] = await Promise.all([
     consultarBull(datos),
     consultarBear(datos),
@@ -99,30 +97,37 @@ export async function OBTENER_JUICIO_FINAL(datos: DatosMercado) {
   console.log(`   📰 FUND: "${argumentoFund.replace(/\n/g, ' ').substring(0, 100)}..."`);
   console.log(`\n⚖️ El Juez está deliberando precios objetivos...`);
 
-  const promptJuez = `Eres KAIROS, Gestor de Fondo de Inversión Experto.
-  Estás operando ${KAIROS_CONFIG.PAIR} en ${KAIROS_CONFIG.TIMEFRAME}.
-  
-  EVIDENCIA PRESENTADA:
-  1. Técnico Alcista: "${argumentoBull}"
-  2. Técnico Bajista: "${argumentoBear}"
-  3. Sentimiento/Volumen: "${argumentoFund}"
+  // --- AQUÍ ESTÁ EL CAMBIO CLAVE: REGLAS MATEMÁTICAS ESTRICTAS ---
+  const promptJuez = `Eres KAIROS, un Gestor de Riesgo Algorítmico (No emocional).
   
   DATOS DUROS:
-  - Precio: ${datos.precio}
+  - Precio Actual: ${datos.precio}
   - Banda Superior: ${datos.bandas.upper}
   - Banda Inferior: ${datos.bandas.lower}
+  - RSI: ${datos.rsi} (Si está entre 45-55 es RANGO/LATERAL -> PELIGRO).
   
-  TU MISIÓN:
-  Decide si operamos. Si lo hacemos, MAXIMIZA la ganancia usando las bandas como objetivos.
+  EVIDENCIA:
+  - Bull: "${argumentoBull}"
+  - Bear: "${argumentoBear}"
+  - Fundamental: "${argumentoFund}"
   
-  REGLAS DE PRECIO (NO USES % FIJOS):
-  - Si COMPRAS (LONG): Tu Take Profit (TP) debe estar cerca de la Banda Superior. Stop Loss (SL) debajo del soporte reciente.
-  - Si VENDES (SHORT): Tu TP debe estar cerca de la Banda Inferior. Stop Loss (SL) encima de la resistencia reciente.
-  - Si el riesgo (distancia al SL) es mayor que el beneficio (distancia al TP), decide "ESPERAR".
-  - Confianza mínima: ${KAIROS_CONFIG.MIN_CONFIDENCE}%.
+  TU TRABAJO (Sigue estos pasos):
+  1. Define la Dirección: ¿Bullish, Bearish o Neutral?
+  2. Define Objetivos:
+     - COMPRA (LONG): TP = Banda Superior | SL = Debajo de soporte reciente.
+     - VENTA (SHORT): TP = Banda Inferior | SL = Encima de resistencia reciente.
+  3. CALCULA EL RATIO (CRÍTICO):
+     - Beneficio = Distancia al TP.
+     - Riesgo = Distancia al SL.
+     - Ratio = Beneficio / Riesgo.
+  
+  REGLAS DE FUEGO:
+  - Si el Ratio es MENOR a 1.5, DEBES RESPONDER "ESPERAR". (No vale la pena el riesgo).
+  - Si el RSI está neutral (45-55) y las bandas son estrechas, RESPONDE "ESPERAR".
+  - Si el Agente Fundamental dice "Volumen Bajo", sé más exigente con el técnico.
 
   Formato JSON OBLIGATORIO:
-  {"decision": "COMPRAR" | "VENDER" | "ESPERAR", "razonamiento": "...", "confianza": 0-100, "stop_loss_price": 0.00, "take_profit_price": 0.00}`;
+  {"decision": "COMPRAR" | "VENDER" | "ESPERAR", "razonamiento": "Menciona el Ratio calculado (Ej: Ratio 2.1 favorable)", "confianza": 0-100, "stop_loss_price": 0.00, "take_profit_price": 0.00}`;
 
   const completion = await groq.chat.completions.create({
     messages: [{ role: "system", content: promptJuez }],
