@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     /* Módulos Modernos */
     "target": "ES2022",
     "module": "NodeNext",

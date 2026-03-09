@@ -1,9 +1,10 @@
+import { fileURLToPath } from 'url';
 import ccxt from 'ccxt';
 import { RSI, BollingerBands } from 'technicalindicators';
 import Groq from "groq-sdk";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from "dotenv";
-import { KAIROS_CONFIG } from './config.ts'; // <--- IMPORTAMOS TUS REGLAS
+import { KAIROS_CONFIG } from './config.ts'; // <--- Corregido a .ts
 
 dotenv.config();
 
@@ -23,7 +24,7 @@ async function KAIROS_SISTEMA_COMPLETO() {
     console.log(`--------------------------------------------------`);
 
     try {
-        // 1. Obtener Velas (Respetando el Timeframe que elegiste)
+        // 1. Obtener Velas
         console.log(`📡 Leyendo mercado ${KAIROS_CONFIG.PAIR}...`);
         const velas = await exchange.fetchOHLCV(KAIROS_CONFIG.PAIR, KAIROS_CONFIG.TIMEFRAME, undefined, 100);
         
@@ -39,7 +40,7 @@ async function KAIROS_SISTEMA_COMPLETO() {
         const rsiActual = rsiRaw[rsiRaw.length - 1];
         const bbActual = bbRaw[bbRaw.length - 1];
 
-        // Preparar el paquete de datos para el Juez
+        // Preparar datos
         const datosMercado = {
             precio: precioActual,
             rsi: rsiActual.toFixed(2),
@@ -48,10 +49,10 @@ async function KAIROS_SISTEMA_COMPLETO() {
                 lower: bbActual.lower.toFixed(2),
                 position: precioActual > bbActual.upper ? "ROMPIENDO_ARRIBA" : precioActual < bbActual.lower ? "ROMPIENDO_ABAJO" : "DENTRO"
             },
-            config: KAIROS_CONFIG // Le pasamos tus reglas a la IA para que sepa qué hacer
+            config: KAIROS_CONFIG
         };
 
-        // 2. EL JUICIO (Ahora con contexto de tu estrategia)
+        // 2. EL JUICIO
         console.log(`🧠 Consultando al Juez (Llama 3.3)...`);
         
         const promptSistema = `Eres KAIROS, un sistema de trading automatizado operando en modo ${KAIROS_CONFIG.MARKET_TYPE}.
@@ -96,10 +97,10 @@ async function KAIROS_SISTEMA_COMPLETO() {
     }
 }
 
-// Exportamos para el scheduler
 export { KAIROS_SISTEMA_COMPLETO };
 
-// Si se ejecuta directo, corre una vez
-if (require.main === module) {
+// --- CORRECCIÓN FINAL: Lógica compatible con ES Modules ---
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) {
     KAIROS_SISTEMA_COMPLETO();
 }
