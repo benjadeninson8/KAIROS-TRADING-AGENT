@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { KAIROS_CONFIG } from './config.ts';
 import { OBTENER_JUICIO_FINAL } from './brain.ts';
 import { EJECUTAR_ORDEN } from './execution.ts';
+import { ENVIAR_ALERTA } from './notifier.ts'; // <--- NUEVO IMPORT
 
 dotenv.config();
 
@@ -19,6 +20,27 @@ async function KAIROS_SISTEMA_COMPLETO() {
     console.log(`\n⚙️ INICIANDO KAIROS PRO: ${KAIROS_CONFIG.PAIR} (${KAIROS_CONFIG.TIMEFRAME})`);
 
     try {
+        // --- 0. EL FRENO DE MANO (Control Diario) ---
+        // Obtenemos fecha de hoy YYYY-MM-DD para contar operaciones
+        const hoy = new Date().toISOString().split('T')[0];
+        
+        const { count, error: countError } = await supabase
+            .from('ai_logs')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', hoy)
+            .in('judge_verdict', ['COMPRAR', 'VENDER']); // Solo contamos operaciones reales
+
+        if (countError) throw countError;
+
+        const operacionesHoy = count || 0;
+        console.log(`   📅 Operaciones hoy: ${operacionesHoy} / ${KAIROS_CONFIG.MAX_TRADES_PER_DAY}`);
+
+        if (operacionesHoy >= KAIROS_CONFIG.MAX_TRADES_PER_DAY) {
+            console.log("   ⛔ META DIARIA ALCANZADA. KAIROS SE DETIENE POR HOY.");
+            return; // <--- AQUÍ SE DETIENE EL SISTEMA
+        }
+        // ------------------------------------------------
+
         // 1. LECTURA PROFUNDA DEL MERCADO
         const velas = await exchange.fetchOHLCV(KAIROS_CONFIG.PAIR, KAIROS_CONFIG.TIMEFRAME, undefined, 100);
         
@@ -59,7 +81,6 @@ async function KAIROS_SISTEMA_COMPLETO() {
         // 3. LA BITÁCORA
         console.log(`\n💾 Veredicto: ${decision.decision} | Confianza: ${decision.confianza}%`);
         
-        // Log extra para ver la magia de los precios dinámicos
         if (decision.take_profit_price && decision.stop_loss_price) {
              console.log(`   🎯 PLAN DE VUELO: Entrar @ ${precioActual} -> TP: ${decision.take_profit_price} | SL: ${decision.stop_loss_price}`);
         }
@@ -75,11 +96,27 @@ async function KAIROS_SISTEMA_COMPLETO() {
 
         if (error) throw error;
 
-        // 4. LA EJECUCIÓN (Paso crítico: Enviamos el plan completo al ejecutor)
-        await EJECUTAR_ORDEN(decision, precioActual);
+        // 4. NOTIFICACIÓN Y EJECUCIÓN
+        // Si el Juez quiere operar, avisamos a Telegram primero
+        if (decision.decision !== "ESPERAR") {
+            const mensaje = `🚨 *KAIROS SEÑAL DETECTADA*\n` +
+                            `🤖 Acción: *${decision.decision}*\n` +
+                            `📉 Precio: $${precioActual}\n` +
+                            `🛡️ SL: $${decision.stop_loss_price}\n` +
+                            `🎯 TP: $${decision.take_profit_price}\n` +
+                            `⚖️ Confianza: ${decision.confianza}%`;
+            
+            await ENVIAR_ALERTA(mensaje);
+            
+            // Enviamos al ejecutor (que tiene su propio filtro de riesgo)
+            await EJECUTAR_ORDEN(decision, precioActual);
+        } else {
+            console.log("   💤 Juez decidió esperar. Silencio en Telegram.");
+        }
 
     } catch (error) {
         console.error("❌ Error en el sistema:", error);
+        await ENVIAR_ALERTA(`⚠️ *ERROR KAIROS*: ${error}`);
     }
 }
 

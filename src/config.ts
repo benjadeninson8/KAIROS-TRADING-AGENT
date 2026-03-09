@@ -19,10 +19,11 @@ export const KAIROS_CONFIG = {
   TIMEFRAME: '15m', 
   
   // 6. SEGURIDAD (Cinturón de seguridad)
-  // YA NO usamos TP/SL fijos. La IA decide según las Bandas.
-  // Pero, por seguridad, nunca permitas una pérdida mayor a esta:
   MAX_STOP_LOSS_PERCENT: 5.0, // Hard Stop de emergencia
   
   // 7. SENTIMIENTO MÍNIMO
-  MIN_CONFIDENCE: 80
+  MIN_CONFIDENCE: 80,
+
+  // 8. LÍMITE DIARIO (NUEVO)
+  MAX_TRADES_PER_DAY: 3
 };
