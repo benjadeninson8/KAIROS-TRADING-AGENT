@@ -1,0 +1,33 @@
+{
+  "name": "kairos",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://benjadeninson8@github.com/benjadeninson8/KAIROS-TRADING-AGENT.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/benjadeninson8/KAIROS-TRADING-AGENT/issues"
+  },
+  "homepage": "https://github.com/benjadeninson8/KAIROS-TRADING-AGENT#readme",
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "ccxt": "^4.5.42",
+    "dotenv": "^17.3.1",
+    "groq-sdk": "^0.37.0",
+    "technicalindicators": "^3.1.0"
+  }
+}
