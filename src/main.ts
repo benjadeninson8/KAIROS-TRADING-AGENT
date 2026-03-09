@@ -1,15 +1,14 @@
 import { fileURLToPath } from 'url';
 import ccxt from 'ccxt';
 import { RSI, BollingerBands } from 'technicalindicators';
-import Groq from "groq-sdk";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from "dotenv";
-import { KAIROS_CONFIG } from './config.ts'; // <--- Corregido a .ts
+import { KAIROS_CONFIG } from './config.ts';
+import { OBTENER_JUICIO_FINAL } from './brain.ts'; // <--- IMPORTAMOS AL JUEZ Y LOS ABOGADOS
 
 dotenv.config();
 
 const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // Inicializar Binance según la configuración (Spot o Futuros)
 const exchange = new ccxt.binance({
@@ -24,7 +23,7 @@ async function KAIROS_SISTEMA_COMPLETO() {
     console.log(`--------------------------------------------------`);
 
     try {
-        // 1. Obtener Velas
+        // 1. OBTENER DATOS DE MERCADO (OJOS)
         console.log(`📡 Leyendo mercado ${KAIROS_CONFIG.PAIR}...`);
         const velas = await exchange.fetchOHLCV(KAIROS_CONFIG.PAIR, KAIROS_CONFIG.TIMEFRAME, undefined, 100);
         
@@ -40,7 +39,7 @@ async function KAIROS_SISTEMA_COMPLETO() {
         const rsiActual = rsiRaw[rsiRaw.length - 1];
         const bbActual = bbRaw[bbRaw.length - 1];
 
-        // Preparar datos
+        // Preparar el paquete de datos
         const datosMercado = {
             precio: precioActual,
             rsi: rsiActual.toFixed(2),
@@ -52,33 +51,12 @@ async function KAIROS_SISTEMA_COMPLETO() {
             config: KAIROS_CONFIG
         };
 
-        // 2. EL JUICIO
-        console.log(`🧠 Consultando al Juez (Llama 3.3)...`);
-        
-        const promptSistema = `Eres KAIROS, un sistema de trading automatizado operando en modo ${KAIROS_CONFIG.MARKET_TYPE}.
-        ESTRATEGIA ACTUAL: ${KAIROS_CONFIG.STRATEGY_NAME}.
-        
-        Tus reglas de fuego:
-        1. Si el RSI > 70, considera VENDER (SHORT).
-        2. Si el RSI < 30, considera COMPRAR (LONG).
-        3. Solo opera si la confianza es mayor a ${KAIROS_CONFIG.MIN_CONFIDENCE}%.
-        4. Calcula Stop Loss (${KAIROS_CONFIG.STOP_LOSS_PERCENT}%) y Take Profit (${KAIROS_CONFIG.TAKE_PROFIT_PERCENT}%) exactos.
-        
-        Responde SOLO JSON: {"decision": "COMPRAR/VENDER/ESPERAR", "razonamiento": "...", "confianza": 0-100, "entry": 0, "sl": 0, "tp": 0}`;
+        // 2. EL JUICIO (SISTEMA DE 3 AGENTES) - AHORA LLAMAMOS AL CEREBRO COMPLEJO
+        console.log(`🧠 Invocando a la Corte Suprema de IA...`);
+        const decision = await OBTENER_JUICIO_FINAL(datosMercado);
 
-        const completion = await groq.chat.completions.create({
-            messages: [
-                { role: "system", content: promptSistema },
-                { role: "user", content: `DATOS ACTUALES: ${JSON.stringify(datosMercado)}` }
-            ],
-            model: "llama-3.3-70b-versatile",
-            temperature: 0,
-        });
-
-        const decision = JSON.parse(completion.choices[0]?.message?.content || "{}");
-
-        // 3. GUARDAR EN MEMORIA
-        console.log(`💾 Veredicto: ${decision.decision} (${decision.confianza}%)`);
+        // 3. GUARDAR EN MEMORIA (DATABASE)
+        console.log(`\n💾 Veredicto Final: ${decision.decision} (${decision.confianza}%)`);
         
         const { error } = await supabase.from('ai_logs').insert([{
             pair: KAIROS_CONFIG.PAIR,
@@ -86,20 +64,21 @@ async function KAIROS_SISTEMA_COMPLETO() {
             rsi: parseFloat(datosMercado.rsi),
             judge_verdict: decision.decision,
             confidence_score: decision.confianza,
-            reasoning: `[${KAIROS_CONFIG.STRATEGY_NAME}] ${decision.razonamiento}`
+            // Guardamos el resumen del juez + los argumentos de los abogados si quieres expandirlo luego
+            reasoning: `[JUEZ] ${decision.razonamiento}` 
         }]);
         
         if (error) throw error;
-        console.log("✅ Ciclo completado correctamente.");
+        console.log("✅ Decisión guardada en Supabase.");
 
     } catch (error) {
-        console.error("❌ Error:", error);
+        console.error("❌ Error CRÍTICO:", error);
     }
 }
 
 export { KAIROS_SISTEMA_COMPLETO };
 
-// --- CORRECCIÓN FINAL: Lógica compatible con ES Modules ---
+// --- Ejecución directa si se llama desde terminal ---
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] === __filename) {
     KAIROS_SISTEMA_COMPLETO();

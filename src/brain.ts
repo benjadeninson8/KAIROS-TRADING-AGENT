@@ -1,81 +1,95 @@
 import Groq from "groq-sdk";
 import dotenv from "dotenv";
+import { KAIROS_CONFIG } from './config.ts';
 
-// Cargar variables de entorno
 dotenv.config();
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Definimos la estructura que QUEREMOS que la IA nos devuelva siempre
-// Esto evita que nos responda con "Hola, claro que sí..."
-const JSON_STRUCTURE = `
-{
-  "decision": "COMPRAR" | "VENDER" | "ESPERAR",
-  "razonamiento": "Explicación breve de por qué...",
-  "confianza": 0-100,
-  "stop_loss_sugerido": number,
-  "take_profit_sugerido": number
-}
-`;
-
-async function consultarKairos() {
-  console.log("🧠 KAIROS está analizando el mercado...");
-
-  // 1. SIMULAMOS DATOS DEL MERCADO (En la Fase 3, esto vendrá de Binance real)
-  const datosSimulados = {
-    moneda: "SOL/USDT",
-    precio_actual: 142.50,
-    rsi: 28, // Sobreventa (Oportunidad de compra técnica)
-    bandas_bollinger: "Tocando banda inferior",
-    noticia_ultima_hora: "Solana anuncia nueva alianza con Google Cloud."
-  };
-
-  try {
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `Eres KAIROS, un Agente de Trading de Inteligencia Artificial experto en gestión de riesgos.
-          Tu trabajo es analizar datos técnicos y fundamentales y tomar decisiones frías.
-          
-          REGLAS:
-          1. Eres escéptico. Prefieres proteger el capital ($10) a arriesgarlo tontamente.
-          2. Responde ÚNICAMENTE en formato JSON válido. Sin texto antes ni después.
-          3. Sigue esta estructura exacta: ${JSON_STRUCTURE}`
-        },
-        {
-          role: "user",
-          content: `Analiza estos datos actuales del mercado: ${JSON.stringify(datosSimulados)}`
-        }
-      ],
-      model: "llama-3.3-70b-versatile", // Usamos el modelo grande y potente de Groq
-      temperature: 0, // 0 = Máxima lógica, 0 creatividad (Queremos un robot, no un poeta)
-    });
-
-    // Obtenemos la respuesta
-    const respuestaIA = completion.choices[0]?.message?.content || "";
-    
-    // Limpiamos por si la IA pone ```json al principio
-    const jsonLimpio = respuestaIA.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    // Convertimos el texto a Objeto Real de JavaScript
-    const decisionFinal = JSON.parse(jsonLimpio);
-
-    console.log("✅ KAIROS HA HABLADO:");
-    console.log("------------------------------------------------");
-    console.log(`📢 Decisión: ${decisionFinal.decision}`);
-    console.log(`🤔 Razón: ${decisionFinal.razonamiento}`);
-    console.log(`🛡️ Confianza: ${decisionFinal.confianza}%`);
-    console.log(`🛑 Stop Loss: $${decisionFinal.stop_loss_sugerido}`);
-    console.log(`🎯 Take Profit: $${decisionFinal.take_profit_sugerido}`);
-    console.log("------------------------------------------------");
-
-  } catch (error) {
-    console.error("❌ Error cerebral:", error);
-  }
+// Definimos la estructura de los datos que reciben los agentes
+interface DatosMercado {
+  precio: number;
+  rsi: string;
+  bandas: any;
+  volumen?: number;
 }
 
-// Ejecutar la función
-consultarKairos();
+// 🐮 EL AGENTE BULL (Optimista)
+async function consultarBull(datos: DatosMercado) {
+  const prompt = `Eres el Agente BULL (Alcista). Tu trabajo es convencer al juez de COMPRAR (LONG).
+  Analiza estos datos técnicos de ${KAIROS_CONFIG.PAIR} en ${KAIROS_CONFIG.TIMEFRAME}:
+  - Precio: ${datos.precio}
+  - RSI: ${datos.rsi} (Si está bajo < 30 es tu mejor argumento de sobreventa)
+  - Bandas: ${JSON.stringify(datos.bandas)}
+  
+  Dame 3 razones cortas y agresivas de por qué el precio va a SUBIR.
+  Ignora cualquier señal bajista. Tu trabajo es VENDER LA SUBIDA.
+  Respuesta máxima: 40 palabras.`;
+
+  const completion = await groq.chat.completions.create({
+    messages: [{ role: "system", content: prompt }],
+    model: "llama-3.3-70b-versatile",
+  });
+  return completion.choices[0]?.message?.content || "Sin argumentos.";
+}
+
+// 🐻 EL AGENTE BEAR (Pesimista)
+async function consultarBear(datos: DatosMercado) {
+  const prompt = `Eres el Agente BEAR (Bajista). Tu trabajo es convencer al juez de VENDER (SHORT).
+  Analiza estos datos técnicos de ${KAIROS_CONFIG.PAIR} en ${KAIROS_CONFIG.TIMEFRAME}:
+  - Precio: ${datos.precio}
+  - RSI: ${datos.rsi} (Si está alto > 70 es tu mejor argumento de sobrecompra)
+  - Bandas: ${JSON.stringify(datos.bandas)}
+  
+  Dame 3 razones cortas y cínicas de por qué el precio va a CAER.
+  Ignora cualquier señal alcista. Tu trabajo es VENDER LA CAÍDA.
+  Respuesta máxima: 40 palabras.`;
+
+  const completion = await groq.chat.completions.create({
+    messages: [{ role: "system", content: prompt }],
+    model: "llama-3.3-70b-versatile",
+  });
+  return completion.choices[0]?.message?.content || "Sin argumentos.";
+}
+
+// ⚖️ EL JUEZ SUPREMO (Decisión Final)
+export async function OBTENER_JUICIO_FINAL(datos: DatosMercado) {
+  console.log("   🐮 Bull está analizando...");
+  console.log("   🐻 Bear está analizando...");
+
+  // Ejecutamos a los dos abogados en paralelo para que sea rápido
+  const [argumentoBull, argumentoBear] = await Promise.all([
+    consultarBull(datos),
+    consultarBear(datos)
+  ]);
+
+  console.log(`\n🗣️ DEBATE EN LA CORTE:`);
+  console.log(`   🐮 BULL DICE: "${argumentoBull.replace(/\n/g, ' ')}"`);
+  console.log(`   🐻 BEAR DICE: "${argumentoBear.replace(/\n/g, ' ')}"`);
+  console.log(`\n⚖️ El Juez está deliberando...`);
+
+  const promptJuez = `Eres KAIROS, el Juez Supremo de Trading.
+  Estás operando en MODO: ${KAIROS_CONFIG.MARKET_TYPE} con Apalancamiento x${KAIROS_CONFIG.LEVERAGE}.
+  
+  Escucha a tus agentes:
+  1. BULL (Alcista): "${argumentoBull}"
+  2. BEAR (Bajista): "${argumentoBear}"
+  
+  DATOS REALES: RSI ${datos.rsi}, Precio ${datos.precio}.
+  
+  TUS REGLAS:
+  - Si el RSI está entre 40 y 60, IGNORA a los agentes y decide "ESPERAR" (El mercado está lateral).
+  - Solo entra si uno de los agentes tiene un argumento técnico irrefutable Y el RSI lo apoya.
+  - Confianza mínima requerida: ${KAIROS_CONFIG.MIN_CONFIDENCE}%.
+
+  Formato JSON OBLIGATORIO:
+  {"decision": "COMPRAR" | "VENDER" | "ESPERAR", "razonamiento": "Resumen final del juez", "confianza": 0-100, "stop_loss": 0, "take_profit": 0}`;
+
+  const completion = await groq.chat.completions.create({
+    messages: [{ role: "system", content: promptJuez }],
+    model: "llama-3.3-70b-versatile",
+    response_format: { type: "json_object" }
+  });
+
+  return JSON.parse(completion.choices[0]?.message?.content || "{}");
+}
