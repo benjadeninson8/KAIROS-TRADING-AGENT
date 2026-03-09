@@ -50,7 +50,7 @@ async function consultarKairos() {
           content: `Analiza estos datos actuales del mercado: ${JSON.stringify(datosSimulados)}`
         }
       ],
-      model: "llama3-70b-8192", // Usamos el modelo grande y potente de Groq
+      model: "llama-3.3-70b-versatile", // Usamos el modelo grande y potente de Groq
       temperature: 0, // 0 = Máxima lógica, 0 creatividad (Queremos un robot, no un poeta)
     });
 
