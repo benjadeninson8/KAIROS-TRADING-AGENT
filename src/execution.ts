@@ -50,7 +50,7 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
   console.log(`      Ratio R/B: 1:${ratio.toFixed(2)}`);
 
   // FILTRO DE CALIDAD: Solo tomamos trades donde ganemos al menos 1.5 veces lo que arriesgamos
-  if (ratio < 1.5) {
+  if (ratio < 0.1) {
       console.log(`   ⛔ OPERACIÓN RECHAZADA: El riesgo es muy alto para la ganancia potencial.`);
       return;
   }
