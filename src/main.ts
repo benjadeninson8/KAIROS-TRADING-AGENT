@@ -19,6 +19,9 @@ const exchange = new ccxt.binance({
 async function KAIROS_SISTEMA_COMPLETO() {
     console.log(`\n⚙️ INICIANDO KAIROS PRO: ${KAIROS_CONFIG.PAIR} (${KAIROS_CONFIG.TIMEFRAME})`);
 
+    // Mensaje de inicio para Telegram
+await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado para ${KAIROS_CONFIG.PAIR}...`);
+
     try {
         // --- 0. EL FRENO DE MANO (Control Diario) ---
         // Obtenemos fecha de hoy YYYY-MM-DD para contar operaciones
