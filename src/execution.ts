@@ -19,19 +19,23 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
   console.log(`      Modo: ${modoPrueba ? 'TESTNET (Simulador)' : 'REAL'}`);
   console.log(`      API Key detectada: ${process.env.EXCHANGE_API_KEY ? 'SÍ ✅' : 'NO ❌'}`);
 
-  // --- CAMBIO A BYBIT ---
+  // --- CAMBIO A BYBIT CON PARCHE DE RELOJ INCORPORADO ---
   const exchange = new ccxt.bybit({
     apiKey: process.env.EXCHANGE_API_KEY,
     secret: process.env.EXCHANGE_SECRET,
-    // Bybit usa la palabra 'swap' para los contratos perpetuos (Futuros USDT)
-    options: { defaultType: KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'swap' : 'spot' }
+    enableRateLimit: true, // <-- Evita bloqueos por exceso de peticiones
+    options: { 
+        defaultType: KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'swap' : 'spot',
+        adjustForTimeDifference: true, // <-- PARCHE 1: Sincroniza la hora automáticamente
+        recvWindow: 10000 // <-- PARCHE 2: Le da 10 segundos de tolerancia al servidor
+    }
   });
 
   if (modoPrueba) {
       exchange.setSandboxMode(true);
       console.log("   🔌 [MODO TESTNET ACTIVADO] Conectado a Bybit Testnet.");
   }
-  // ----------------------
+  // ------------------------------------------------------
 
   if (!decision.take_profit_price || !decision.stop_loss_price) {
       console.log("   ⚠️ ALERTA: La IA no definió precios de salida claros. Abortando.");
