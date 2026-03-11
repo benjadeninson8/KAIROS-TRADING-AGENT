@@ -1,14 +1,24 @@
 import ccxt from 'ccxt';
 import dotenv from "dotenv";
 import { KAIROS_CONFIG } from './config.ts';
+import { ENVIAR_ALERTA } from './notifier.ts'; // <-- Agregamos Telegram
 
 dotenv.config();
 
+// 1. CONFIGURACIÓN DEL EXCHANGE (TESTNET O REAL)
+const modoPrueba = process.env.KAIROS_MODE === 'TEST';
+
 const exchange = new ccxt.binance({
-  apiKey: process.env.BINANCE_API_KEY,
-  secret: process.env.BINANCE_SECRET_KEY,
+  apiKey: modoPrueba ? process.env.BINANCE_TESTNET_API_KEY : process.env.BINANCE_API_KEY,
+  secret: modoPrueba ? process.env.BINANCE_TESTNET_SECRET_KEY : process.env.BINANCE_SECRET_KEY,
   options: { defaultType: KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'future' : 'spot' }
 });
+
+// ¡EL INTERRUPTOR MÁGICO DE LA TESTNET!
+if (modoPrueba) {
+    exchange.setSandboxMode(true);
+    console.log("   🔌 [MODO TESTNET ACTIVADO] Operando con dinero de mentira.");
+}
 
 export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
   // 1. Filtro básico
@@ -47,6 +57,7 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
 
   try {
     // 4. Gestión de Capital (Entrada)
+    await exchange.loadMarkets(); // <-- CRÍTICO: Cargar reglas de decimales de Binance
     const balance = await exchange.fetchBalance();
     const saldoUSDT = balance['USDT']?.free || 0;
     
@@ -65,30 +76,50 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
         ? montoInversion * KAIROS_CONFIG.LEVERAGE 
         : montoInversion;
 
-    const cantidadTokens = montoApalancado / precioActual;
+    const cantidadTokensBruta = montoApalancado / precioActual;
+    
+    // <-- NUEVO: Formatear la cantidad exacta según las reglas de Binance (Ej: 1.5 en vez de 1.53421)
+    const cantidadTokens = exchange.amountToPrecision(KAIROS_CONFIG.PAIR, cantidadTokensBruta);
 
     console.log(`   💰 Capital Real: $${montoInversion.toFixed(2)} | Posición (x${KAIROS_CONFIG.LEVERAGE}): $${montoApalancado.toFixed(2)}`);
-    console.log(`   📉 Cantidad Activo: ${cantidadTokens.toFixed(4)} ${KAIROS_CONFIG.PAIR}`);
+    console.log(`   📉 Cantidad Activo: ${cantidadTokens} ${KAIROS_CONFIG.PAIR}`);
 
     // 5. Configurar Apalancamiento en Binance
     if (KAIROS_CONFIG.MARKET_TYPE === 'FUTURE') {
-        try { await exchange.setLeverage(KAIROS_CONFIG.LEVERAGE, KAIROS_CONFIG.PAIR); } catch (e) {}
+        try { 
+            await exchange.setLeverage(KAIROS_CONFIG.LEVERAGE, KAIROS_CONFIG.PAIR); 
+            console.log(`   ⚙️ Apalancamiento ajustado a ${KAIROS_CONFIG.LEVERAGE}x`);
+        } catch (e) {
+            console.log(`   ⚠️ Apalancamiento ya configurado o no soportado en este modo.`);
+        }
     }
 
-    // 6. ¡FUEGO! (SIMULACIÓN)
-    // Aquí es donde en el futuro descomentaremos exchange.createOrder
-    console.log(`   🚀 [SIMULACIÓN] ENVIANDO ORDEN MARKET...`);
-    console.log(`      LADO: ${decision.decision}`);
-    console.log(`      CANTIDAD: ${cantidadTokens.toFixed(4)}`);
+    // 6. ¡FUEGO! (EJECUCIÓN REAL)
+    console.log(`   🚀 ENVIANDO ORDEN DE MERCADO...`);
+    const side = decision.decision === "COMPRAR" ? 'buy' : 'sell';
     
-    // OJO: En la realidad, aquí enviaríamos una orden OCO (One Cancels the Other) o 3 órdenes:
-    // 1. Market Buy
-    // 2. Stop Loss (Trigger)
-    // 3. Take Profit (Limit)
-    console.log(`   🛡️ [SIMULACIÓN] STOP LOSS PROGRAMADO EN: $${decision.stop_loss_price}`);
-    console.log(`   🤑 [SIMULACIÓN] TAKE PROFIT PROGRAMADO EN: $${decision.take_profit_price}`);
+    // Lanzamos la orden principal de entrada
+    const order = await exchange.createMarketOrder(KAIROS_CONFIG.PAIR, side, parseFloat(cantidadTokens));
+    
+    console.log(`   ✅ ¡ORDEN EJECUTADA! ID: ${order.id}`);
 
-  } catch (error) {
-    console.error("   ❌ ERROR CRÍTICO AL EJECUTAR:", error);
+    // Notificamos a Telegram
+    await ENVIAR_ALERTA(
+        `🚨 *KAIROS EJECUTÓ UNA ORDEN (${modoPrueba ? 'TESTNET' : 'REAL'})*\n\n` +
+        `🤖 Acción: *${decision.decision}*\n` +
+        `🪙 Par: ${KAIROS_CONFIG.PAIR}\n` +
+        `📦 Tamaño: ${cantidadTokens}\n` +
+        `💵 Precio de Entrada: $${precioActual}\n` +
+        `🎯 TP Sugerido: $${decision.take_profit_price}\n` +
+        `🛡️ SL Sugerido: $${decision.stop_loss_price}`
+    );
+
+    console.log(`   🛡️ NOTA: Stop Loss y Take Profit deben colocarse (Fase 2 de ejecución).`);
+    console.log(`      SL Sugerido: $${decision.stop_loss_price}`);
+    console.log(`      TP Sugerido: $${decision.take_profit_price}`);
+
+  } catch (error: any) {
+    console.error("   ❌ ERROR CRÍTICO AL EJECUTAR:", error.message);
+    await ENVIAR_ALERTA(`❌ *ERROR EJECUTANDO ORDEN KAIROS*\n${error.message}`);
   }
 }
