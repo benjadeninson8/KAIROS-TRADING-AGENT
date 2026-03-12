@@ -2,10 +2,15 @@ import ccxt from 'ccxt';
 import dotenv from "dotenv";
 import { KAIROS_CONFIG } from './config.ts';
 import { ENVIAR_ALERTA } from './notifier.ts';
+import { createClient } from '@supabase/supabase-js'; // <-- NUEVO IMPORT
 
 dotenv.config();
 
-export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
+// <-- INICIAMOS SUPABASE AQUÍ TAMBIÉN -->
+const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
+
+// Fíjate que añadimos rsiActual como parámetro
+export async function EJECUTAR_ORDEN(decision: any, precioActual: number, rsiActual: number = 0) {
   if (decision.decision === "ESPERAR") {
       console.log("   💤 Juez: Mercado lateral o peligroso. Esperando.");
       return; 
@@ -19,15 +24,14 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
   console.log(`      Modo: ${modoPrueba ? 'TESTNET (Simulador)' : 'REAL'}`);
   console.log(`      API Key detectada: ${process.env.EXCHANGE_API_KEY ? 'SÍ ✅' : 'NO ❌'}`);
 
-  // --- CAMBIO A BYBIT CON PARCHE DE RELOJ INCORPORADO ---
   const exchange = new ccxt.bybit({
     apiKey: process.env.EXCHANGE_API_KEY,
     secret: process.env.EXCHANGE_SECRET,
-    enableRateLimit: true, // <-- Evita bloqueos por exceso de peticiones
+    enableRateLimit: true,
     options: { 
         defaultType: KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'swap' : 'spot',
-        adjustForTimeDifference: true, // <-- PARCHE 1: Sincroniza la hora automáticamente
-        recvWindow: 10000 // <-- PARCHE 2: Le da 10 segundos de tolerancia al servidor
+        adjustForTimeDifference: true,
+        recvWindow: 10000
     }
   });
 
@@ -35,7 +39,6 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
       exchange.setSandboxMode(true);
       console.log("   🔌 [MODO TESTNET ACTIVADO] Conectado a Bybit Testnet.");
   }
-  // ------------------------------------------------------
 
   if (!decision.take_profit_price || !decision.stop_loss_price) {
       console.log("   ⚠️ ALERTA: La IA no definió precios de salida claros. Abortando.");
@@ -63,7 +66,6 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
   try {
     await exchange.loadMarkets(); 
     const balance = await exchange.fetchBalance();
-    // En Bybit V5 los fondos suelen estar en USDT
     const saldoUSDT = balance['USDT']?.free || 0;
     
     let montoInversion = 0;
@@ -75,7 +77,6 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
 
     if (montoInversion > saldoUSDT) montoInversion = saldoUSDT * 0.95;
 
-    // Validación de saldo pobre
     if (montoInversion <= 0) {
         throw new Error(`No tienes fondos en USDT en la Testnet. Ve a la web de Bybit Testnet y pide monedas falsas.`);
     }
@@ -102,9 +103,28 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number) {
     console.log(`   🚀 ENVIANDO ORDEN DE MERCADO A BYBIT...`);
     const side = decision.decision === "COMPRAR" ? 'buy' : 'sell';
     
+    // 🔥 EL DISPARO A BYBIT 🔥
     const order = await exchange.createMarketOrder(KAIROS_CONFIG.PAIR, side, parseFloat(cantidadTokens));
     
-    console.log(`   ✅ ¡ORDEN EJECUTADA! ID: ${order.id}`);
+    console.log(`   ✅ ¡ORDEN EJECUTADA EN BYBIT! ID: ${order.id}`);
+
+    // --- NUEVO: GUARDAR EN SUPABASE SOLO SI LA ORDEN FUE EXITOSA ---
+    console.log(`   💾 Guardando operación real en Supabase...`);
+    const { error: supabaseError } = await supabase.from('ai_logs').insert([{
+        pair: KAIROS_CONFIG.PAIR,
+        price_at_time: precioActual,
+        rsi: rsiActual, // Lo recibimos desde el cerebro
+        judge_verdict: decision.decision,
+        confidence_score: decision.confianza || 0,
+        reasoning: `[ORDEN EJECUTADA] Ratio: 1:${ratio.toFixed(2)} | SL: ${decision.stop_loss_price} | TP: ${decision.take_profit_price} | Razón IA: ${decision.razonamiento}`
+    }]);
+
+    if (supabaseError) {
+        console.error("   ⚠️ Alerta: La orden se ejecutó en Bybit, pero falló al guardar en Supabase:", supabaseError);
+    } else {
+        console.log(`   ✅ Operación registrada en base de datos correctamente.`);
+    }
+    // -----------------------------------------------------------------
 
     await ENVIAR_ALERTA(
         `🚨 *KAIROS EJECUTÓ UNA ORDEN (BYBIT ${modoPrueba ? 'TESTNET' : 'REAL'})*\n\n` +

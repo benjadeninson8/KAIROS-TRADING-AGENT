@@ -6,41 +6,39 @@ import dotenv from "dotenv";
 import { KAIROS_CONFIG } from './config.ts';
 import { OBTENER_JUICIO_FINAL } from './brain.ts';
 import { EJECUTAR_ORDEN } from './execution.ts';
-import { ENVIAR_ALERTA } from './notifier.ts'; // <--- NUEVO IMPORT
+import { ENVIAR_ALERTA } from './notifier.ts';
 
 dotenv.config();
 
 const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
 
-const exchange = new ccxt.binance({
-  'options': { 'defaultType': KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'future' : 'spot' }
+const exchange = new ccxt.bybit({
+  'options': { 'defaultType': KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'swap' : 'spot' }
 });
 
 async function KAIROS_SISTEMA_COMPLETO() {
     console.log(`\n⚙️ INICIANDO KAIROS PRO: ${KAIROS_CONFIG.PAIR} (${KAIROS_CONFIG.TIMEFRAME})`);
 
-    // Mensaje de inicio para Telegram
-await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado para ${KAIROS_CONFIG.PAIR}...`);
+    await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado para ${KAIROS_CONFIG.PAIR}...`);
 
     try {
         // --- 0. EL FRENO DE MANO (Control Diario) ---
-        // Obtenemos fecha de hoy YYYY-MM-DD para contar operaciones
         const hoy = new Date().toISOString().split('T')[0];
         
         const { count, error: countError } = await supabase
             .from('ai_logs')
             .select('*', { count: 'exact', head: true })
             .gte('created_at', hoy)
-            .in('judge_verdict', ['COMPRAR', 'VENDER']); // Solo contamos operaciones reales
+            .in('judge_verdict', ['COMPRAR', 'VENDER']); // Solo cuenta las que pasaron el filtro
 
         if (countError) throw countError;
 
         const operacionesHoy = count || 0;
-        console.log(`   📅 Operaciones hoy: ${operacionesHoy} / ${KAIROS_CONFIG.MAX_TRADES_PER_DAY}`);
+        console.log(`   📅 Operaciones Reales Hoy: ${operacionesHoy} / ${KAIROS_CONFIG.MAX_TRADES_PER_DAY}`);
 
         if (operacionesHoy >= KAIROS_CONFIG.MAX_TRADES_PER_DAY) {
             console.log("   ⛔ META DIARIA ALCANZADA. KAIROS SE DETIENE POR HOY.");
-            return; // <--- AQUÍ SE DETIENE EL SISTEMA
+            return; 
         }
         // ------------------------------------------------
 
@@ -50,7 +48,6 @@ await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado par
         const preciosCierre = velas.map(v => v[4] as number);
         const volumenes = velas.map(v => v[5] as number);
         
-        // Indicadores Técnicos
         const rsiRaw = RSI.calculate({ values: preciosCierre, period: 14 });
         const bbRaw = BollingerBands.calculate({ values: preciosCierre, period: 20, stdDev: 2 });
         
@@ -61,7 +58,6 @@ await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado par
         const rsiActual = rsiRaw[rsiRaw.length - 1];
         const bbActual = bbRaw[bbRaw.length - 1];
 
-        // Paquete de Datos para el Cerebro
         const datosMercado = {
             precio: precioActual,
             rsi: rsiActual.toFixed(2),
@@ -88,21 +84,11 @@ await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado par
              console.log(`   🎯 PLAN DE VUELO: Entrar @ ${precioActual} -> TP: ${decision.take_profit_price} | SL: ${decision.stop_loss_price}`);
         }
 
-        const { error } = await supabase.from('ai_logs').insert([{
-            pair: KAIROS_CONFIG.PAIR,
-            price_at_time: precioActual,
-            rsi: parseFloat(datosMercado.rsi),
-            judge_verdict: decision.decision,
-            confidence_score: decision.confianza,
-            reasoning: `[JUEZ] ${decision.razonamiento}` 
-        }]);
-
-        if (error) throw error;
+        // --- AQUÍ ELIMINAMOS EL SUPABASE.INSERT ---
 
         // 4. NOTIFICACIÓN Y EJECUCIÓN
-        // Si el Juez quiere operar, avisamos a Telegram primero
         if (decision.decision !== "ESPERAR") {
-            const mensaje = `🚨 *KAIROS SEÑAL DETECTADA*\n` +
+            const mensaje = `🚨 *KAIROS SEÑAL DETECTADA (INTENCIÓN)*\n` +
                             `🤖 Acción: *${decision.decision}*\n` +
                             `📉 Precio: $${precioActual}\n` +
                             `🛡️ SL: $${decision.stop_loss_price}\n` +
@@ -111,8 +97,8 @@ await ENVIAR_ALERTA(`🟢 *SISTEMA KAIROS INICIADO*\n🔎 Escaneando mercado par
             
             await ENVIAR_ALERTA(mensaje);
             
-            // Enviamos al ejecutor (que tiene su propio filtro de riesgo)
-            await EJECUTAR_ORDEN(decision, precioActual);
+            // Le pasamos el RSI y Razonamiento al ejecutor para que ÉL los guarde
+            await EJECUTAR_ORDEN(decision, precioActual, parseFloat(datosMercado.rsi));
         } else {
             console.log("   💤 Juez decidió esperar. Silencio en Telegram.");
         }
