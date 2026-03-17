@@ -10,31 +10,34 @@ dotenv.config();
 
 const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
 
+let estadoAnterior = false; // Memoria para saber si estaba apagado o prendido
+
 console.log("==========================================");
 console.log(`⏱️ KAIROS AUTO-PILOT INICIADO`);
 console.log(`   Par Base: ${KAIROS_CONFIG.PAIR}`);
 console.log("==========================================\n");
 
-ENVIAR_ALERTA(`🟢 *KAIROS CONECTADO AL COMMAND CENTER*\nEsperando órdenes maestras.`);
+ENVIAR_ALERTA(`🟢 *KAIROS MOTOR ENCENDIDO*\nConectado al Command Center. Esperando el próximo ciclo de 15m.`);
 
 // Función para revisar los botones de la web
 async function LEER_CONTROLES() {
     try {
         const { data, error } = await supabase.from('bot_settings').select('*').eq('id', 1).single();
         if (data) {
-            KAIROS_CONFIG.MARKET_TYPE = data.market_type; // Actualizamos el mercado al vuelo
-            return data.is_active; // Retornamos true (ON) o false (OFF)
+            KAIROS_CONFIG.MARKET_TYPE = data.market_type; 
+            return data.is_active; 
         }
     } catch (e) {
         console.error("❌ Error leyendo controles:", e);
     }
-    return false; // Por seguridad, si falla la lectura, se queda apagado.
+    return false;
 }
 
 // Ejecución inicial
 (async () => {
-    console.log("🚀 Sincronizando con Dashboard...");
+    console.log("🚀 Sincronizando con Dashboard por primera vez...");
     const isOn = await LEER_CONTROLES();
+    estadoAnterior = isOn;
     
     if (isOn) {
         console.log(`[SYS ON] Operando en mercado: ${KAIROS_CONFIG.MARKET_TYPE}`);
@@ -43,7 +46,8 @@ async function LEER_CONTROLES() {
         console.log(`[SYS OFF] Bot pausado desde el Command Center. No se abrirán operaciones.`);
     }
     
-    await RASTREAR_RESULTADOS(); // El Sabueso trabaja incluso con el bot apagado
+    await RASTREAR_RESULTADOS(); 
+    console.log(`\n⏳ KAIROS en espera. El próximo escaneo será en el minuto :00, :15, :30 o :45...`);
 })();
 
 // El Reloj Principal
@@ -53,6 +57,16 @@ cron.schedule('*/15 * * * *', async () => {
     
     const isOn = await LEER_CONTROLES();
     
+    // Si hubo un cambio de estado desde la web, avisamos por Telegram
+    if (isOn !== estadoAnterior) {
+        if (isOn) {
+            await ENVIAR_ALERTA(`✅ *SISTEMA ACTIVADO DESDE LA WEB*\nKAIROS reanuda operaciones en ${KAIROS_CONFIG.MARKET_TYPE}.`);
+        } else {
+            await ENVIAR_ALERTA(`⏸️ *SISTEMA PAUSADO DESDE LA WEB*\nKAIROS ha sido detenido. No se abrirán nuevas operaciones.`);
+        }
+        estadoAnterior = isOn; // Actualizamos la memoria
+    }
+    
     if (isOn) {
         console.log(`🔥 [KAIROS ACTIVO] Mercado: ${KAIROS_CONFIG.MARKET_TYPE}. Iniciando escaneo...`);
         await KAIROS_SISTEMA_COMPLETO();
@@ -60,6 +74,6 @@ cron.schedule('*/15 * * * *', async () => {
         console.log(`💤 [KAIROS PAUSADO] Órdenes del jefe: No operar.`);
     }
     
-    await RASTREAR_RESULTADOS(); // Siempre rastrea los cierres
-    console.log(`\nEsperando el próximo ciclo...`);
+    await RASTREAR_RESULTADOS(); 
+    console.log(`\n⏳ Análisis terminado. Durmiendo hasta el próximo cuarto de hora...`);
 });
