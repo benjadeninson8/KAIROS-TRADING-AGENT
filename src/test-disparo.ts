@@ -15,8 +15,8 @@ async function FORZAR_DISPARO() {
         decision: "COMPRAR",
         confianza: 99,
         razonamiento: "Simulación de francotirador. Bybit confirmado.",
-        take_profit_price: 88.50, // Distancia $1.67
-        stop_loss_price: 85.00    // Distancia $1.83 (Ratio 0.9, el filtro actual lo deja pasar)
+        take_profit_price: 92.50, // Distancia $1.67
+        stop_loss_price: 88.00    // Distancia $1.83 (Ratio 0.9, el filtro actual lo deja pasar)
     };
 
     // Fíjate que ahora pasamos 3 variables: decisión, precio, y RSI.

@@ -2,28 +2,26 @@ export const KAIROS_CONFIG = {
   // 1. IDENTIDAD DEL ACTIVO
   PAIR: 'SOL/USDT',
   
-  // 2. TIPO DE MERCADO
-  // 'SPOT' o 'FUTURE'
+  // 2. TIPO DE MERCADO ('SPOT' o 'FUTURE' - Ahora controlado por la WEB)
   MARKET_TYPE: 'FUTURE', 
   
   // 3. APALANCAMIENTO (Solo para FUTURE)
   LEVERAGE: 5, 
   
   // 4. GESTIÓN DE CAPITAL (Entrada)
-  // 'PERCENTAGE' o 'FIXED'
   CAPITAL_MODE: 'PERCENTAGE', 
-  CAPITAL_VALUE: 10, // 10% del saldo o $10 fijos
+  CAPITAL_VALUE: 10,
   
   // 5. ESTRATEGIA
   STRATEGY_NAME: 'SCALPING_DINAMICO',
   TIMEFRAME: '15m', 
   
-  // 6. SEGURIDAD (Cinturón de seguridad)
-  MAX_STOP_LOSS_PERCENT: 5.0, // Hard Stop de emergencia
+  // 6. SEGURIDAD
+  MAX_STOP_LOSS_PERCENT: 5.0,
   
   // 7. SENTIMIENTO MÍNIMO
   MIN_CONFIDENCE: 80,
 
-  // 8. LÍMITE DIARIO (NUEVO)
+  // 8. LÍMITE DIARIO
   MAX_TRADES_PER_DAY: 3
 };
