@@ -23,5 +23,14 @@ export const KAIROS_CONFIG = {
   MIN_CONFIDENCE: 80,
 
   // 8. LÍMITE DIARIO
-  MAX_TRADES_PER_DAY: 10
+  MAX_TRADES_PER_DAY: 10,
+
+  // 9. MODO COPILOTO (NUEVO)
+  COPILOT_MODE: false,
+
+
+  // 10. PROTECCIÓN ACTIVA (BREAKEVEN) <-- ¡NUEVO!
+  USE_BREAKEVEN: true,          // Encender o apagar el escudo
+  BREAKEVEN_TRIGGER_PERCENT: 2.0 // Cuando la ganancia llegue al +2%, subimos el escudo
+
 };

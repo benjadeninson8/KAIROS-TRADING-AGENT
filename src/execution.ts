@@ -1,6 +1,5 @@
 import ccxt from 'ccxt';
 import dotenv from "dotenv";
-import { KAIROS_CONFIG } from './config.ts';
 import { ENVIAR_ALERTA } from './notifier.ts';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,27 +7,40 @@ dotenv.config();
 
 const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_KEY || '');
 
-export async function EJECUTAR_ORDEN(decision: any, precioActual: number, rsiActual: number = 0) {
+// Fíjate que ahora recibe "userConfig" (los datos del cliente actual)
+export async function EJECUTAR_ORDEN(
+    decision: any, 
+    precioActual: number, 
+    rsiActual: number = 0,
+    userConfig: any // <-- ESTO ES NUEVO
+) {
   if (decision.decision === "ESPERAR") {
-      console.log("   💤 Juez: Mercado lateral o peligroso. Esperando.");
+      console.log(`  💤 [${userConfig.user_id.substring(0,6)}] Juez: Mercado lateral. Esperando.`);
       return; 
   }
 
-  console.log(`\n🔫 ANALIZANDO VIABILIDAD DE LA OPERACIÓN...`);
+  console.log(`\n🔫 [${userConfig.user_id.substring(0,6)}] ANALIZANDO VIABILIDAD DE LA OPERACIÓN...`);
 
   const modoPrueba = process.env.KAIROS_MODE === 'TEST';
   
-  console.log(`   🔌 DIAGNÓSTICO DE CONEXIÓN (BYBIT):`);
-  console.log(`      Modo: ${modoPrueba ? 'TESTNET (Simulador)' : 'REAL'}`);
-  console.log(`      API Key detectada: ${process.env.EXCHANGE_API_KEY ? 'SÍ ✅' : 'NO ❌'}`);
-  console.log(`🔍 DEBUG: El mercado actual detectado por el bot es: '${KAIROS_CONFIG.MARKET_TYPE}'`);
+  // Verificamos si EL CLIENTE puso sus llaves
+  if (!userConfig.bybit_api_key || !userConfig.bybit_api_secret) {
+      console.log(`  ❌ [${userConfig.user_id.substring(0,6)}] El cliente no tiene configuradas sus API Keys de Bybit. Abortando.`);
+      return;
+  }
 
+  console.log(`  🔌 DIAGNÓSTICO DE CONEXIÓN (BYBIT):`);
+  console.log(`      Modo: ${modoPrueba ? 'TESTNET (Simulador)' : 'REAL'}`);
+  console.log(`      API Key Cliente: SÍ ✅`);
+  console.log(`🔍 DEBUG: El mercado configurado por el cliente es: '${userConfig.market_type}'`);
+
+  // Conectamos a Bybit usando LAS LLAVES DEL CLIENTE
   const exchange = new ccxt.bybit({
-    apiKey: process.env.EXCHANGE_API_KEY,
-    secret: process.env.EXCHANGE_SECRET,
+    apiKey: userConfig.bybit_api_key,
+    secret: userConfig.bybit_api_secret,
     enableRateLimit: true,
     options: { 
-        defaultType: KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' ? 'swap' : 'spot',
+        defaultType: userConfig.market_type === 'FUTURE' ? 'swap' : 'spot',
         adjustForTimeDifference: true,
         recvWindow: 10000
     }
@@ -36,28 +48,23 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number, rsiAct
 
   if (modoPrueba) {
       exchange.setSandboxMode(true);
-      console.log("   🔌 [MODO TESTNET ACTIVADO] Conectado a Bybit Testnet.");
+      console.log("  🔌 [MODO TESTNET ACTIVADO] Conectado a Bybit Testnet.");
   }
 
   if (!decision.take_profit_price || !decision.stop_loss_price) {
-      console.log("   ⚠️ ALERTA: La IA no definió precios de salida claros. Abortando.");
+      console.log("  ⚠️ ALERTA: La IA no definió precios de salida claros. Abortando.");
       return;
   }
 
   const distanciaTP = Math.abs(decision.take_profit_price - precioActual);
   const distanciaSL = Math.abs(precioActual - decision.stop_loss_price);
   
-  if (distanciaSL === 0) { console.log("   ⚠️ Error: SL igual al precio de entrada."); return; }
+  if (distanciaSL === 0) { console.log("  ⚠️ Error: SL igual al precio de entrada."); return; }
 
   const ratio = distanciaTP / distanciaSL;
   
-  console.log(`   📐 MATEMÁTICA DE LA OPERACIÓN:`);
-  console.log(`      Riesgo (Distancia a SL): $${distanciaSL.toFixed(2)}`);
-  console.log(`      Beneficio (Distancia a TP): $${distanciaTP.toFixed(2)}`);
-  console.log(`      Ratio R/B: 1:${ratio.toFixed(2)}`);
-
   if (ratio < 0.1) { 
-      console.log(`   ⛔ OPERACIÓN RECHAZADA: El riesgo es muy alto para la ganancia potencial.`);
+      console.log(`  ⛔ OPERACIÓN RECHAZADA: El riesgo es muy alto para la ganancia potencial.`);
       return;
   }
 
@@ -66,64 +73,60 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number, rsiAct
     const balance = await exchange.fetchBalance();
     const saldoUSDT = balance['USDT']?.free || 0;
     
-    let montoInversion = 0;
-    if (KAIROS_CONFIG.CAPITAL_MODE === 'FIXED') {
-        montoInversion = KAIROS_CONFIG.CAPITAL_VALUE;
-    } else {
-        montoInversion = (saldoUSDT * KAIROS_CONFIG.CAPITAL_VALUE) / 100;
-    }
+    // Usamos el capital configurado POR EL CLIENTE en su Dashboard
+    let montoInversion = userConfig.capital_value;
 
     if (montoInversion > saldoUSDT) montoInversion = saldoUSDT * 0.95;
 
     if (montoInversion <= 0) {
-        throw new Error(`No tienes fondos en USDT en la Testnet. Ve a la web de Bybit Testnet y pide monedas falsas.`);
+        throw new Error(`El cliente no tiene fondos suficientes en USDT.`);
     }
 
-    const montoApalancado = KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' 
-        ? montoInversion * KAIROS_CONFIG.LEVERAGE 
+    // Para el SaaS vamos a fijar el apalancamiento en 10x por ahora, luego lo puedes poner en el Dashboard
+    const leverageSaaS = 10; 
+    const montoApalancado = userConfig.market_type === 'FUTURE' 
+        ? montoInversion * leverageSaaS 
         : montoInversion;
 
     // 🔥 FORMATEADOR DE PARES INTELIGENTE 🔥
-    // CCXT necesita que los contratos perpetuos terminen en ':USDT' (ej: SOL/USDT:USDT)
-    let parFinal = KAIROS_CONFIG.PAIR;
-    if (KAIROS_CONFIG.MARKET_TYPE === 'FUTURE' && !parFinal.includes(':USDT')) {
-        parFinal = `${KAIROS_CONFIG.PAIR}:USDT`;
-        console.log(`   🔧 Par adaptado para Bybit Futuros: ${parFinal}`);
+    let parFinal = userConfig.pair;
+    if (userConfig.market_type === 'FUTURE' && !parFinal.includes(':USDT')) {
+        parFinal = `${userConfig.pair}:USDT`;
+        console.log(`  🔧 Par adaptado para Bybit Futuros: ${parFinal}`);
     }
 
     const cantidadTokensBruta = montoApalancado / precioActual;
     const cantidadTokens = exchange.amountToPrecision(parFinal, cantidadTokensBruta);
 
-    console.log(`   💰 Capital Real: $${montoInversion.toFixed(2)} | Posición (x${KAIROS_CONFIG.LEVERAGE}): $${montoApalancado.toFixed(2)}`);
-    console.log(`   📉 Cantidad Activo: ${cantidadTokens} ${parFinal}`);
+    console.log(`  💰 Capital Real: $${montoInversion.toFixed(2)} | Posición (x${leverageSaaS}): $${montoApalancado.toFixed(2)}`);
+    console.log(`  📉 Cantidad Activo: ${cantidadTokens} ${parFinal}`);
 
-    if (KAIROS_CONFIG.MARKET_TYPE === 'FUTURE') {
+    if (userConfig.market_type === 'FUTURE') {
         try { 
-            await exchange.setLeverage(KAIROS_CONFIG.LEVERAGE, parFinal); 
-            console.log(`   ⚙️ Apalancamiento ajustado a ${KAIROS_CONFIG.LEVERAGE}x`);
+            await exchange.setLeverage(leverageSaaS, parFinal); 
+            console.log(`  ⚙️ Apalancamiento ajustado a ${leverageSaaS}x`);
         } catch (e) {
-            console.log(`   ⚠️ Apalancamiento ya configurado o ignorado por el exchange.`);
+            console.log(`  ⚠️ Apalancamiento ya configurado o ignorado por el exchange.`);
         }
     }
 
-    console.log(`   🚀 ENVIANDO ORDEN DE MERCADO Y ESCUDOS A BYBIT...`);
+    console.log(`  🚀 ENVIANDO ORDEN DE MERCADO Y ESCUDOS A BYBIT...`);
     const side = decision.decision === "COMPRAR" ? 'buy' : 'sell';
     
-    // 🔥 EL ESCUDO DE TITANIO 🔥
     const parametrosExtra = {
         stopLoss: parseFloat(decision.stop_loss_price).toString(),
         takeProfit: parseFloat(decision.take_profit_price).toString()
     };
     
-    // Disparo con el par formateado correctamente
     const order = await exchange.createMarketOrder(parFinal, side, parseFloat(cantidadTokens), undefined, parametrosExtra);
     
-    console.log(`   ✅ ¡ORDEN EJECUTADA! ID: ${order.id}`);
-    console.log(`   🛡️ ESCUDO ACTIVADO: Bybit protegiendo SL: $${decision.stop_loss_price} | TP: $${decision.take_profit_price}`);
+    console.log(`  ✅ ¡ORDEN EJECUTADA! ID: ${order.id}`);
 
-    console.log(`   💾 Guardando operación real en Supabase...`);
+    // 🔥 GUARDAMOS EL LOG EN LA FILA DEL CLIENTE ESPECÍFICO 🔥
+    console.log(`  💾 Guardando operación en el historial del cliente...`);
     const { error: supabaseError } = await supabase.from('ai_logs').insert([{
-        pair: KAIROS_CONFIG.PAIR,
+        user_id: userConfig.user_id, // <-- EL ID DEL DUEÑO DE LA CUENTA
+        pair: userConfig.pair,
         price_at_time: precioActual,
         rsi: rsiActual, 
         judge_verdict: decision.decision,
@@ -132,23 +135,22 @@ export async function EJECUTAR_ORDEN(decision: any, precioActual: number, rsiAct
     }]);
 
     if (supabaseError) {
-        console.error("   ⚠️ Falló al guardar en Supabase:", supabaseError);
-    } else {
-        console.log(`   ✅ Operación registrada en base de datos correctamente.`);
+        console.error("  ⚠️ Falló al guardar en Supabase:", supabaseError);
     }
 
+    // Le pasamos el telegram_chat_id del cliente al Notificador
     await ENVIAR_ALERTA(
-        `🚨 *KAIROS EJECUTÓ UNA ORDEN PROTEGIDA (${modoPrueba ? 'TESTNET' : 'REAL'})*\n\n` +
+        `🚨 *KAIROS CLOUD EJECUTÓ UNA ORDEN (${modoPrueba ? 'TESTNET' : 'REAL'})*\n\n` +
         `🤖 Acción: *${decision.decision}*\n` +
         `🪙 Par: ${parFinal}\n` +
-        `📦 Tamaño: ${cantidadTokens}\n` +
         `💵 Entrada: $${precioActual}\n` +
-        `🎯 Take Profit: $${decision.take_profit_price} ✅\n` +
-        `🛡️ Stop Loss: $${decision.stop_loss_price} ✅`
+        `🎯 TP: $${decision.take_profit_price}\n` +
+        `🛡️ SL: $${decision.stop_loss_price}`,
+        userConfig.telegram_chat_id // <-- EL TELEGRAM DEL CLIENTE
     );
 
   } catch (error: any) {
-    console.error("   ❌ ERROR CRÍTICO AL EJECUTAR:", error.message);
-    await ENVIAR_ALERTA(`❌ *ERROR EJECUTANDO ORDEN KAIROS*\n${error.message}`);
+    console.error(`  ❌ [${userConfig.user_id.substring(0,6)}] ERROR CRÍTICO AL EJECUTAR:`, error.message);
+    await ENVIAR_ALERTA(`❌ *ERROR EJECUTANDO ORDEN*\n${error.message}`, userConfig.telegram_chat_id);
   }
 }

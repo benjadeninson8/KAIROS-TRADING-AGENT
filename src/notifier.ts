@@ -1,29 +1,52 @@
+import TelegramBot from 'node-telegram-bot-api';
 import dotenv from "dotenv";
 
 dotenv.config();
 
-export async function ENVIAR_ALERTA(mensaje: string) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+// El token de tu Bot "Global" de KAIROS sigue estando en tu .env
+const token = process.env.TELEGRAM_BOT_TOKEN;
 
-  // Si no hay credenciales, no hacemos nada (pero no rompemos el bot)
-  if (!token || !chatId) return;
+// 1. Inicializamos el bot con "polling" para que tenga el micrófono abierto
+export const botTelegram = token ? new TelegramBot(token, { polling: true }) : null;
+
+// 2. Escudo contra el lag: Silenciamos los errores de red de Telegram 
+// para que no te llene la consola de basura si Cantv/Inter tiene un micro-corte.
+if (botTelegram) {
+    botTelegram.on('polling_error', (error) => {
+        // Ignoramos el error en silencio
+    });
+}
+
+// 3. La función de envío MULTI-CLIENTE
+// Fíjate que ahora recibe "userChatId" (el ID de Telegram del dueño de la operación)
+export async function ENVIAR_ALERTA(
+    mensaje: string, 
+    userChatId?: string | null, 
+    modoCopiloto: boolean = false
+) {
+  // Si el bot no está activo o el cliente no puso su ID de Telegram, cancelamos el envío
+  if (!botTelegram || !userChatId) return;
 
   try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: mensaje,
-        parse_mode: 'Markdown' // Permite negritas y estilo
-      })
-    });
-    console.log("   📲 Notificación enviada a Telegram.");
+    const opciones: TelegramBot.SendMessageOptions = { parse_mode: 'Markdown' };
 
-  } catch (error) {
-    console.error("❌ Error enviando Telegram:", error);
+    // Si KAIROS necesita permiso, le inyectamos el panel de control al chat
+    if (modoCopiloto) {
+      opciones.reply_markup = {
+        inline_keyboard: [
+          [
+            { text: "🟢 APROBAR", callback_data: "COPILOT_APPROVE" },
+            { text: "🔴 ABORTAR", callback_data: "COPILOT_ABORT" }
+          ]
+        ]
+      };
+    }
+
+    // Disparamos el mensaje directamente al celular de ese cliente
+    await botTelegram.sendMessage(userChatId, mensaje, opciones);
+    console.log(`   📲 Notificación enviada al Telegram del cliente (${userChatId}).`);
+
+  } catch (error: any) {
+    console.error(`❌ Error enviando Telegram al cliente ${userChatId}:`, error.message);
   }
 }
